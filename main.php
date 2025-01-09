@@ -10,51 +10,50 @@ class ScholarAPI {
         $this->apiKey = "626809aa2306ed9f692097aca4621a59a25521a982fe46c9fae2b87017ee79cb";
         $this->authorId = "f34uj7UAAAAJ";
         $this->cacheFile = 'scholar_cache.json'; // File to store cached data
-        $this->cacheDuration = 60*60*24; // 30 days in seconds
+        $this->cacheDuration = 5; // 30 days in seconds
     }
 
     public function getScholarData() {
-    // Check if the cache is valid
-    if ($this->isCacheValid()) {
-        return $this->getCacheData();
-    }
-
-    $params = [
-        "engine" => "google_scholar_author",
-        "author_id" => $this->authorId,
-        "hl" => "en",
-        "num" => "100",
-        "sort" => "pubdate",
-        "api_key" => $this->apiKey
-    ];
-
-    $url = "https://serpapi.com/search?" . http_build_query($params);
-
-    try {
-        $response = file_get_contents($url);
-        if ($response === FALSE) {
-            throw new Exception("Unable to fetch data from API.");
-        }
-
-        $results = json_decode($response, true);
-        $formattedData = [
-            "profile" => $this->formatProfile($results),
-            "publications" => $this->formatPublications($results)
-        ];
-
-        // Save data to cache
-        $this->saveCacheData($formattedData);
-
-        return $formattedData;
-    } catch (Exception $e) {
-        // If API call fails, use cached data if available
         if ($this->isCacheValid()) {
             return $this->getCacheData();
         }
 
-        return ["error" => $e->getMessage()];
+        $params = [
+            "engine" => "google_scholar_author",
+            "author_id" => $this->authorId,
+            "hl" => "en",
+            "num" => "100",
+            "sort" => "pubdate",
+            "api_key" => $this->apiKey
+        ];
+
+        $url = "https://serpapi.com/search?" . http_build_query($params);
+
+        try {
+            $response = file_get_contents($url);
+            if ($response === FALSE) {
+                throw new Exception("Unable to fetch data.");
+            }
+
+            $results = json_decode($response, true);
+            $formattedData = [
+                "profile" => $this->formatProfile($results),
+                "publications" => $this->formatPublications($results)
+            ];
+
+            // Save data to cache
+            $this->saveCacheData($formattedData);
+
+            return $formattedData;
+        } catch (Exception $e) {
+            // If API fails and cache exists, return cached data
+            if ($this->isCacheValid()) {
+                return $this->getCacheData();
+            }
+
+            return ["error" => $e->getMessage()];
+        }
     }
-}
 
     private function formatProfile($results) {
         $authorInfo = $results['author'] ?? [];
@@ -102,41 +101,30 @@ class ScholarAPI {
     }
 
     private function isCacheValid() {
-    // Check if the cache file exists
-    if (!file_exists($this->cacheFile)) {
-        return false;
-    }
-
-    // Check the file's last modification time
-    $cacheTimestamp = filemtime($this->cacheFile);
-    $currentTimestamp = time();
-
-    // Cache is valid if it's within the trigger time (30 days)
-    return ($currentTimestamp - $cacheTimestamp) < $this->cacheDuration;
-}
-
-    private function getCacheData() {
-        // Read and decode the cache file
-        if (file_exists($this->cacheFile)) {
-            $cacheData = file_get_contents($this->cacheFile);
-            return json_decode($cacheData, true);
+        if (!file_exists($this->cacheFile)) {
+            return false;
         }
 
-        // Return an empty array if cache is missing or unreadable
-        return [];
+        $cacheData = json_decode(file_get_contents($this->cacheFile), true);
+        $timestamp = $cacheData['timestamp'] ?? 0;
+
+        // Check if cache is still valid
+        return (time() - $timestamp) < $this->cacheDuration;
     }
 
-  private function saveCacheData($data) {
-      try {
-          // Save data to the cache file
-          if (file_put_contents($this->cacheFile, json_encode($data, JSON_PRETTY_PRINT)) === false) {
-              throw new Exception("Failed to write cache file.");
-          }
-      } catch (Exception $e) {
-          // Handle any errors during cache saving
-          error_log("Cache save error: " . $e->getMessage());
-      }
-  }
+    private function getCacheData() {
+        $cacheData = json_decode(file_get_contents($this->cacheFile), true);
+        return $cacheData['data'] ?? [];
+    }
+
+    private function saveCacheData($data) {
+        $cacheData = [
+            "timestamp" => time(),
+            "data" => $data
+        ];
+
+        file_put_contents($this->cacheFile, json_encode($cacheData, JSON_PRETTY_PRINT));
+    }
 }
 
 $scholarAPI = new ScholarAPI();
