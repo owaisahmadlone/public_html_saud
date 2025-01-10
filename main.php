@@ -46,7 +46,6 @@ class ScholarAPI {
 
             return $formattedData;
         } catch (Exception $e) {
-            // If API fails and cache exists, return cached data
             if ($this->isCacheValid()) {
                 return $this->getCacheData();
             }
@@ -59,7 +58,6 @@ class ScholarAPI {
         $authorInfo = $results['author'] ?? [];
         $citedByTable = $results['cited_by']['table'] ?? [];
 
-        // Extract h_index and i10_index values
         $hIndex = 0;
         $i10Index = 0;
 
@@ -72,18 +70,17 @@ class ScholarAPI {
             }
         }
 
-            return [
-                "name" => $authorInfo['name'] ?? '',
-                "affiliation" => $authorInfo['affiliations'] ?? '',
-                "email" => $authorInfo['email'] ?? '',
-                "citations" => [
-                    "total" => $citedByTable[0]['citations']['all'] ?? 0,
-                    "h_index" => $hIndex,
-                    "i10_index" => $i10Index
-                ]
-            ];
-        }
-
+        return [
+            "name" => $authorInfo['name'] ?? '',
+            "affiliation" => $authorInfo['affiliations'] ?? '',
+            "email" => $authorInfo['email'] ?? '',
+            "citations" => [
+                "total" => $citedByTable[0]['citations']['all'] ?? 0,
+                "h_index" => $hIndex,
+                "i10_index" => $i10Index
+            ]
+        ];
+    }
 
     private function formatPublications($results) {
         $publications = [];
@@ -108,13 +105,15 @@ class ScholarAPI {
         $cacheData = json_decode(file_get_contents($this->cacheFile), true);
         $timestamp = $cacheData['timestamp'] ?? 0;
 
-        // Check if cache is still valid
         return (time() - $timestamp) < $this->cacheDuration;
     }
 
     private function getCacheData() {
-        $cacheData = json_decode(file_get_contents($this->cacheFile), true);
-        return $cacheData['data'] ?? [];
+        if (file_exists($this->cacheFile)) {
+            $cacheData = json_decode(file_get_contents($this->cacheFile), true);
+            return $cacheData['data'] ?? [];
+        }
+        return [];
     }
 
     private function saveCacheData($data) {
@@ -123,37 +122,16 @@ class ScholarAPI {
             "data" => $data
         ];
 
-        file_put_contents($this->cacheFile, json_encode($cacheData, JSON_PRETTY_PRINT));
+        if (file_put_contents($this->cacheFile, json_encode($cacheData, JSON_PRETTY_PRINT)) === false) {
+            throw new Exception("Failed to save cache file.");
+        }
     }
 }
 
 $scholarAPI = new ScholarAPI();
 $publications = $scholarAPI->getScholarData()['publications'];
-
-// Handle AJAX filtering
-if (isset($_GET['search']) || isset($_GET['year'])) {
-    $searchTerm = strtolower($_GET['search'] ?? '');
-    $yearFilter = $_GET['year'] ?? '';
-
-    $publications = array_filter($publications, function ($pub) use ($searchTerm, $yearFilter) {
-        $matchesSearch = $searchTerm ? (
-            stripos($pub['title'], $searchTerm) !== false ||
-            stripos($pub['authors'], $searchTerm) !== false ||
-            stripos($pub['journal'], $searchTerm) !== false ||
-            stripos((string)$pub['year'], $searchTerm) !== false
-        ) : true;
-
-        $matchesYear = $yearFilter ? ((string)$pub['year'] === $yearFilter) : true;
-
-        return $matchesSearch && $matchesYear;
-    });
-
-    // Output filtered publications as JSON
-    header('Content-Type: application/json');
-    echo json_encode(array_values($publications));
-    exit;
-}
 ?>
+
 
 
 <!doctype html>
@@ -572,32 +550,6 @@ if (isset($_GET['search']) || isset($_GET['year'])) {
                   document.getElementById('scholar-email').textContent = "saud@civil.iitkgp.ac.in";
                   document.getElementById('scholar-email').href = `mailto:${data.email}`;
 
-                  // // Update interests
-                  // const interestsContainer = document.getElementById('scholar-interests');
-                  // interestsContainer.innerHTML = data.interests
-                  //     .map(interest => `<span class="interest-tag">${interest}</span>`)
-                  //     .join('');
-
-                  // Update citation stats
-                  //     const statsContainer = document.getElementById('citation-stats');
-                  //     statsContainer.innerHTML = `
-                  //         <div class="stat-box">
-                  //             <h3>${formatNumber(data.citations.total)}</h3>
-                  //             <p>Citations</p>
-                  //         </div>
-                  //         <div class="stat-box">
-                  //             <h3>${data.citations.h_index}</h3>
-                  //             <p>h-index</p>
-                  //         </div>
-                  //         <div class="stat-box">
-                  //             <h3>${data.citations.i10_index}</h3>
-                  //             <p>i10-index</p>
-                  //         </div>
-                  //     `;
-                  // } catch (error) {
-                  //     console.error('Error loading scholar data:', error);
-                  //     showError('Failed to load scholar profile data');
-                  // }
                   const statsContainer = document.getElementById('citation-stats');
                   statsContainer.innerHTML = `
                     <div class="stat-box">
@@ -619,75 +571,9 @@ if (isset($_GET['search']) || isset($_GET['year'])) {
                 }
               }
 
-              // Load and display publications
-              let debounceTimer; // To track debounce timing
-
-              async function loadPublications(searchTerm = '', yearFilter = '') {
-                const publicationList = document.querySelector('.publication-list');
-                publicationList.innerHTML = '<div class="loading">Loading publications...</div>';
-
-                try {
-                    // Make an AJAX call to fetch filtered publications
-                    const queryParams = new URLSearchParams({ search: searchTerm, year: yearFilter });
-                    const response = await fetch(`main.php?${queryParams}`);
-                    const publications = await response.json();
-
-                    if (!publications || publications.length === 0) {
-                        publicationList.innerHTML = '<div class="loading">No publications found</div>';
-                        return;
-                    }
-
-                    // Update year filter options
-                    updateYearFilterOptions(publications);
-
-                    // Display publications
-                    publicationList.innerHTML = publications
-                        .map(pub => createPublicationCard(pub))
-                        .join('');
-                } catch (error) {
-                    console.error('Error loading publications:', error);
-                    showError('Failed to load publications');
-                }
-            }
-
-
-              function createPublicationCard(pub) {
-                return `
-                            <div class="publication-card">
-                                <a href="${pub.link}" class="publication-title" target="_blank">${pub.title}</a>
-                                <p class="publication-authors">${pub.authors}</p>
-                                <p class="publication-journal">${pub.journal}</p>
-                                <div class="publication-meta">
-                                    <span class="publication-year">${pub.year}</span>
-                                    ${pub.citations > 0 ?
-                    `<span class="citations">
-                                            <i class="fas fa-quote-right"></i>
-                                            ${formatNumber(pub.citations)} citations
-                                        </span>` :
-                    ''
-                  }
-                                </div>
-                            </div>
-                        `;
-              }
-
-              function updateYearFilterOptions(publications) {
-                const yearFilter = document.getElementById('year-filter');
-                const years = [...new Set(publications.map(pub => pub.year))]
-                  .sort((a, b) => b - a);
-
-                const currentValue = yearFilter.value;
-                yearFilter.innerHTML = '<option value="">All Years</option>' +
-                  years.map(year => `<option value="${year}">${year}</option>`).join('');
-                yearFilter.value = currentValue;
-              }
-
-              function showError(message) {
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'error-message';
-                errorDiv.textContent = message;
-                document.querySelector('.publication-list').prepend(errorDiv);
-              }
+              // Declare debounceTimer at the top level
+              let debounceTimer;
+              let publicationsData = []; // Global variable to store all publications data
 
               // Debounce function to delay execution
               function debounce(func, delay) {
@@ -697,26 +583,141 @@ if (isset($_GET['search']) || isset($_GET['year'])) {
                   };
               }
 
-              // Event listeners for search and year filter
+              async function loadPublications(searchTerm = '', yearFilter = '') {
+                  console.log('Search Term:', searchTerm);
+                  console.log('Year Filter:', yearFilter);
+
+                  const publicationList = document.querySelector('.publication-list');
+                  publicationList.innerHTML = '<div class="loading">Loading publications...</div>';
+
+                  try {
+                      // Load data if not already loaded
+                      if (publicationsData.length === 0) {
+                          const response = await fetch('scholar_cache.json');
+                          if (!response.ok) throw new Error('Failed to fetch JSON file');
+                          const data = await response.json();
+                          publicationsData = data.data?.publications || [];
+                      }
+
+                      // Filter publications
+                      const filteredPublications = publicationsData.filter(pub => {
+                          const matchesSearch = !searchTerm || 
+                              pub.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              pub.authors?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              pub.journal?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              String(pub.year).includes(searchTerm);
+
+                          const matchesYear = !yearFilter || String(pub.year) === yearFilter;
+
+                          return matchesSearch && matchesYear;
+                      });
+
+                      console.log('Filtered Publications:', filteredPublications);
+
+                      // Update the display
+                      if (filteredPublications.length === 0) {
+                          publicationList.innerHTML = '<div class="no-results">No publications found</div>';
+                          return;
+                      }
+
+                      updateYearFilterOptions(publicationsData);
+                      publicationList.innerHTML = filteredPublications
+                          .map(pub => createPublicationCard(pub))
+                          .join('');
+
+                  } catch (error) {
+                      console.error('Error loading publications:', error);
+                      showError('Failed to load publications');
+                  }
+              }
+
+              // Wait for DOM to be fully loaded
+              document.addEventListener('DOMContentLoaded', function() {
+                  // Initialize the search functionality
+                  const searchBar = document.querySelector('.search-bar');
+                  const yearFilter = document.getElementById('year-filter');
+
+                  if (searchBar) {
+                      const debouncedSearch = debounce((searchTerm, yearValue) => {
+                          loadPublications(searchTerm, yearValue);
+                      }, 300);
+
+                      searchBar.addEventListener('input', (e) => {
+                          const searchTerm = e.target.value;
+                          const yearValue = yearFilter ? yearFilter.value : '';
+                          debouncedSearch(searchTerm, yearValue);
+                      });
+                  } else {
+                      console.error('Search bar element not found');
+                  }
+
+                  if (yearFilter) {
+                      yearFilter.addEventListener('change', (e) => {
+                          const searchTerm = searchBar ? searchBar.value : '';
+                          const yearValue = e.target.value;
+                          loadPublications(searchTerm, yearValue);
+                      });
+                  }
+              });
+
+
+
+              function createPublicationCard(pub) {
+                  return `
+                      <div class="publication-card">
+                          <a href="${pub.link}" class="publication-title" target="_blank">${pub.title}</a>
+                          <p class="publication-authors">${pub.authors}</p>
+                          <p class="publication-journal">${pub.journal}</p>
+                          <div class="publication-meta">
+                              <span class="publication-year">${pub.year}</span>
+                              ${pub.citations > 0
+                                  ? `<span class="citations">
+                                      <i class="fas fa-quote-right"></i>
+                                      ${formatNumber(pub.citations)} citations
+                                  </span>`
+                                  : ''}
+                          </div>
+                      </div>
+                  `;
+              }
+
+              function updateYearFilterOptions(publications) {
+                  const yearFilter = document.getElementById('year-filter');
+                  const years = [...new Set(publications.map(pub => pub.year))].sort((a, b) => b - a);
+
+                  const currentValue = yearFilter.value;
+                  yearFilter.innerHTML = '<option value="">All Years</option>' +
+                      years.map(year => `<option value="${year}">${year}</option>`).join('');
+                  yearFilter.value = currentValue;
+              }
+
+              function showError(message) {
+                  const errorDiv = document.createElement('div');
+                  errorDiv.className = 'error-message';
+                  errorDiv.textContent = message;
+                  document.querySelector('.publication-list').prepend(errorDiv);
+              }
+
+
               document.querySelector('.search-bar').addEventListener('input', debounce((e) => {
-                  const searchTerm = e.target.value;
-                  const yearFilter = document.getElementById('year-filter').value;
+                  const searchTerm = e.target.value; // Get the current value of the search bar
+                  const yearFilter = document.getElementById('year-filter').value; // Get the selected year filter
 
                   // Reload publications based on search term and year filter
                   loadPublications(searchTerm, yearFilter);
-              }, 600)); // Delay of 600ms
+              }, 600)); // Debounce to prevent excessive filtering
+
 
               document.getElementById('year-filter').addEventListener('change', (e) => {
                   const searchTerm = document.querySelector('.search-bar').value;
                   const yearFilter = e.target.value;
-
-                  // Reload publications based on search term and year filter
                   loadPublications(searchTerm, yearFilter);
               });
 
               // Initial load
               loadScholarData();
               loadPublications();
+
             </script>
           </div>
 
